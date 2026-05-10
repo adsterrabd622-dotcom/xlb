@@ -488,11 +488,11 @@ export default function App() {
           <div className="flex-1 overflow-auto bg-white relative custom-scrollbar select-none">
             {filteredDataWithOriginalIndices.length > 0 ? (
               <table className="border-collapse w-max min-w-full">
-                <thead className="sticky top-0 z-30 bg-slate-50/95 backdrop-blur-sm shadow-sm border-b border-slate-200">
+                <thead className="sticky top-0 z-30 bg-slate-200/95 backdrop-blur-sm shadow-sm border-b border-slate-300">
                    <tr>
-                     <th className="w-12 bg-slate-100/95 border-r border-slate-200 sticky left-0 z-40 shadow-[1px_0_0_0_#e2e8f0]"></th>
+                     <th className="w-12 bg-slate-200/95 border-r border-slate-300 sticky left-0 z-40 shadow-[1px_0_0_0_#cbd5e1]"></th>
                      {sheetData[0]?.map((_, colIndex) => (
-                       <th key={colIndex} className={`px-3 py-1.5 border-r border-slate-200 font-mono text-[11px] font-bold uppercase tracking-widest min-w-[100px] max-w-[300px] truncate select-none transition-colors ${selectedCell?.c === colIndex ? 'bg-indigo-50/80 text-indigo-700' : 'text-slate-500'}`}>
+                       <th key={colIndex} className={`px-3 py-1.5 border-r border-slate-300 font-mono text-[11px] font-bold uppercase tracking-widest min-w-[100px] max-w-[300px] truncate select-none transition-colors ${selectedCell?.c === colIndex ? 'bg-indigo-100 text-indigo-800' : 'text-slate-600'}`}>
                          {numberToColumn(colIndex)}
                        </th>
                      ))}
@@ -505,9 +505,9 @@ export default function App() {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: Math.min(idx * 0.02, 0.4), duration: 0.3 }}
                       key={originalIndex} 
-                      className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors group"
+                      className="border-b border-slate-200 hover:bg-slate-50/50 transition-colors group"
                     >
-                      <td className={`sticky left-0 z-20 w-12 border-r border-slate-200 shadow-[1px_0_0_0_#f1f5f9] text-center text-xs font-semibold group-hover:bg-slate-50 transition-colors select-none ${selectedCell?.r === originalIndex ? 'bg-indigo-50/80 text-indigo-700' : 'bg-slate-50 text-slate-400'}`}>
+                      <td className={`sticky left-0 z-20 w-12 border-r border-slate-300 shadow-[1px_0_0_0_#cbd5e1] text-center text-xs font-semibold group-hover:bg-slate-200/60 transition-colors select-none ${selectedCell?.r === originalIndex ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-500'}`}>
                         {originalIndex + 1}
                       </td>
                       {row.map((cell, colIndex) => {
