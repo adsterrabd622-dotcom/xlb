@@ -54,6 +54,24 @@ export default function App() {
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
 
   useEffect(() => {
+    if (fileName && activeSheet) {
+      const key = `copiedCells-${fileName}-${activeSheet}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        try {
+          setCopiedCells(new Set(JSON.parse(saved)));
+        } catch (e) {
+          setCopiedCells(new Set());
+        }
+      } else {
+        setCopiedCells(new Set());
+      }
+    } else {
+      setCopiedCells(new Set());
+    }
+  }, [fileName, activeSheet]);
+
+  useEffect(() => {
     const dateOptions: Intl.DateTimeFormatOptions = { 
       weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' 
     };
@@ -265,7 +283,13 @@ export default function App() {
       const strValue = String(value).trim();
       if (strValue && strValue !== 'null' && strValue !== 'undefined') {
         navigator.clipboard.writeText(strValue).then(() => {
-          setCopiedCells(prev => new Set(prev).add(`${r}-${c}`));
+          setCopiedCells(prev => {
+            const next = new Set(prev).add(`${r}-${c}`);
+            if (fileName && activeSheet) {
+              localStorage.setItem(`copiedCells-${fileName}-${activeSheet}`, JSON.stringify(Array.from(next)));
+            }
+            return next;
+          });
           toast.success('কপি করা হয়েছে! (Copied)', {
             description: `Cell ${numberToColumn(c)}${r + 1} content copied to clipboard.`,
             duration: 1500,
@@ -282,6 +306,9 @@ export default function App() {
     setCopiedCells(prev => {
       const newSet = new Set(prev);
       newSet.delete(`${r}-${c}`);
+      if (fileName && activeSheet) {
+        localStorage.setItem(`copiedCells-${fileName}-${activeSheet}`, JSON.stringify(Array.from(newSet)));
+      }
       return newSet;
     });
     setSelectedCell(null);
