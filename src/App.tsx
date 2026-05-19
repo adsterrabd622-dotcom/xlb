@@ -59,7 +59,31 @@ export default function App() {
       const saved = localStorage.getItem(key);
       if (saved) {
         try {
-          setCopiedCells(new Set(JSON.parse(saved)));
+          const parsed = JSON.parse(saved);
+          const now = Date.now();
+          const sevenDays = 7 * 24 * 60 * 60 * 1000;
+          
+          if (Array.isArray(parsed)) {
+            const validCells = new Set<string>();
+            const newData: Record<string, number> = {};
+            parsed.forEach(cell => {
+              validCells.add(cell);
+              newData[cell] = now;
+            });
+            setCopiedCells(validCells);
+            localStorage.setItem(key, JSON.stringify(newData));
+          } else {
+            const validCells = new Set<string>();
+            const newData: Record<string, number> = {};
+            Object.entries(parsed).forEach(([cell, timestamp]) => {
+              if (now - (timestamp as number) <= sevenDays) {
+                validCells.add(cell);
+                newData[cell] = timestamp as number;
+              }
+            });
+            setCopiedCells(validCells);
+            localStorage.setItem(key, JSON.stringify(newData));
+          }
         } catch (e) {
           setCopiedCells(new Set());
         }
@@ -286,7 +310,17 @@ export default function App() {
           setCopiedCells(prev => {
             const next = new Set(prev).add(`${r}-${c}`);
             if (fileName && activeSheet) {
-              localStorage.setItem(`copiedCells-${fileName}-${activeSheet}`, JSON.stringify(Array.from(next)));
+              const key = `copiedCells-${fileName}-${activeSheet}`;
+              let currentData: Record<string, number> = {};
+              try {
+                const saved = localStorage.getItem(key);
+                if (saved) {
+                  const parsed = JSON.parse(saved);
+                  if (!Array.isArray(parsed)) currentData = parsed;
+                }
+              } catch(e) {}
+              currentData[`${r}-${c}`] = Date.now();
+              localStorage.setItem(key, JSON.stringify(currentData));
             }
             return next;
           });
@@ -307,7 +341,17 @@ export default function App() {
       const newSet = new Set(prev);
       newSet.delete(`${r}-${c}`);
       if (fileName && activeSheet) {
-        localStorage.setItem(`copiedCells-${fileName}-${activeSheet}`, JSON.stringify(Array.from(newSet)));
+        const key = `copiedCells-${fileName}-${activeSheet}`;
+        let currentData: Record<string, number> = {};
+        try {
+          const saved = localStorage.getItem(key);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (!Array.isArray(parsed)) currentData = parsed;
+          }
+        } catch(e) {}
+        delete currentData[`${r}-${c}`];
+        localStorage.setItem(key, JSON.stringify(currentData));
       }
       return newSet;
     });
