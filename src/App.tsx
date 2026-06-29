@@ -1110,7 +1110,7 @@ export default function App() {
       </AnimatePresence>
 
       <Authenticator />
-      <Toaster position="bottom-right" richColors theme="light" closeButton style={{ fontFamily: 'Inter, sans-serif' }} />
+      <Toaster position="bottom-left" richColors theme="light" closeButton style={{ fontFamily: 'Inter, sans-serif' }} />
     </div>
   );
 }
