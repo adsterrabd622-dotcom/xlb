@@ -2,5 +2,7 @@
   "name": "Excel File Viewer",
   "description": "View Excel files, copy cell contents with a click, and easily read large text without breaking table layouts.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

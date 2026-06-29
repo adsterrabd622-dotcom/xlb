@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { Upload, FileSpreadsheet, X, Info, Search, TableProperties, Send, Calendar, CheckCircle2, Inbox, Lock, ArrowLeft, Download, FileJson, Trash2 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
+import Authenticator from './components/Authenticator';
 
 type CellData = string | number | null;
 
@@ -57,43 +58,138 @@ export default function App() {
     if (fileName && activeSheet) {
       const key = `copiedCells-${fileName}-${activeSheet}`;
       const saved = localStorage.getItem(key);
+      const now = Date.now();
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      
+      let localData: Record<string, number> = {};
+      const validCells = new Set<string>();
+      
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          const now = Date.now();
-          const sevenDays = 7 * 24 * 60 * 60 * 1000;
-          
           if (Array.isArray(parsed)) {
-            const validCells = new Set<string>();
-            const newData: Record<string, number> = {};
             parsed.forEach(cell => {
               validCells.add(cell);
-              newData[cell] = now;
+              localData[cell] = now;
             });
-            setCopiedCells(validCells);
-            localStorage.setItem(key, JSON.stringify(newData));
-          } else {
-            const validCells = new Set<string>();
-            const newData: Record<string, number> = {};
+          } else if (typeof parsed === 'object' && parsed !== null) {
             Object.entries(parsed).forEach(([cell, timestamp]) => {
-              if (now - (timestamp as number) <= sevenDays) {
+              if (now - (timestamp as number) <= thirtyDays) {
                 validCells.add(cell);
-                newData[cell] = timestamp as number;
+                localData[cell] = timestamp as number;
               }
             });
-            setCopiedCells(validCells);
-            localStorage.setItem(key, JSON.stringify(newData));
           }
         } catch (e) {
-          setCopiedCells(new Set());
+          console.error("Failed to parse local storage", e);
         }
-      } else {
-        setCopiedCells(new Set());
       }
+      
+      setCopiedCells(new Set(validCells));
+      
+      // Sync and restore from server backup (ensures persistence even if browser clear data is triggered)
+      const syncWithServerBackup = async () => {
+        try {
+          const response = await fetch(`/api/copied-cells/${encodeURIComponent(key)}`);
+          if (response.ok) {
+            const serverData = await response.json();
+            if (serverData && typeof serverData === 'object') {
+              const mergedData: Record<string, number> = { ...serverData, ...localData };
+              const mergedCells = new Set<string>();
+              const cleanedMergedData: Record<string, number> = {};
+              
+              Object.entries(mergedData).forEach(([cell, timestamp]) => {
+                if (now - (timestamp as number) <= thirtyDays) {
+                  mergedCells.add(cell);
+                  cleanedMergedData[cell] = timestamp as number;
+                }
+              });
+              
+              setCopiedCells(mergedCells);
+              localStorage.setItem(key, JSON.stringify(cleanedMergedData));
+              
+              if (JSON.stringify(serverData) !== JSON.stringify(cleanedMergedData)) {
+                await fetch('/api/copied-cells', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ key, data: cleanedMergedData })
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Failed to sync copied cells with server:", err);
+        }
+      };
+      
+      syncWithServerBackup();
     } else {
       setCopiedCells(new Set());
     }
   }, [fileName, activeSheet]);
+
+  // Cleanup stale copied cells older than 30 days on application initialization
+  useEffect(() => {
+    const cleanupOldCopiedCells = () => {
+      const now = Date.now();
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('copiedCells-')) {
+            const saved = localStorage.getItem(key);
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              
+              if (Array.isArray(parsed)) {
+                const upgraded: Record<string, number> = {};
+                parsed.forEach(cell => {
+                  upgraded[cell] = now;
+                });
+                localStorage.setItem(key, JSON.stringify(upgraded));
+              } else if (typeof parsed === 'object' && parsed !== null) {
+                const updated: Record<string, number> = {};
+                let hasValidCells = false;
+                
+                Object.entries(parsed).forEach(([cell, timestamp]) => {
+                  if (now - (timestamp as number) <= thirtyDays) {
+                    updated[cell] = timestamp as number;
+                    hasValidCells = true;
+                  }
+                });
+                
+                if (hasValidCells) {
+                  localStorage.setItem(key, JSON.stringify(updated));
+                  // Sync cleanup with server
+                  fetch('/api/copied-cells', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key, data: updated })
+                  }).catch(() => {});
+                } else {
+                  keysToRemove.push(key);
+                }
+              }
+            }
+          }
+        }
+        keysToRemove.forEach(k => {
+          localStorage.removeItem(k);
+          // Delete key on server backup too
+          fetch('/api/copied-cells', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: k, data: {} })
+          }).catch(() => {});
+        });
+      } catch (error) {
+        console.error("Failed to clean up stale localStorage data:", error);
+      }
+    };
+    cleanupOldCopiedCells();
+  }, []);
 
   useEffect(() => {
     const dateOptions: Intl.DateTimeFormatOptions = { 
@@ -291,49 +387,83 @@ export default function App() {
       });
   }, [sheetData, searchTerm]);
 
-  const clickTimeout = React.useRef<NodeJS.Timeout | null>(null);
-
-  const handleCellClick = (r: number, c: number, value: CellData) => {
-    if (clickTimeout.current) {
-      clearTimeout(clickTimeout.current);
-      clickTimeout.current = null;
-      handleCellDoubleClick(r, c);
-      return;
+  const copyTextToClipboard = async (text: string): Promise<boolean> => {
+    // 1. Try modern clipboard API first
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (err) {
+        console.error('Modern clipboard API failed, trying fallback:', err);
+      }
     }
 
-    clickTimeout.current = setTimeout(() => {
-      clickTimeout.current = null;
-      setSelectedCell({ r, c, value });
-      const strValue = String(value).trim();
-      if (strValue && strValue !== 'null' && strValue !== 'undefined') {
-        navigator.clipboard.writeText(strValue).then(() => {
-          setCopiedCells(prev => {
-            const next = new Set(prev).add(`${r}-${c}`);
-            if (fileName && activeSheet) {
-              const key = `copiedCells-${fileName}-${activeSheet}`;
-              let currentData: Record<string, number> = {};
-              try {
-                const saved = localStorage.getItem(key);
-                if (saved) {
-                  const parsed = JSON.parse(saved);
-                  if (!Array.isArray(parsed)) currentData = parsed;
-                }
-              } catch(e) {}
-              currentData[`${r}-${c}`] = Date.now();
-              localStorage.setItem(key, JSON.stringify(currentData));
-            }
-            return next;
-          });
-          toast.success('কপি করা হয়েছে! (Copied)', {
-            description: `Cell ${numberToColumn(c)}${r + 1} content copied to clipboard.`,
-            duration: 1500,
-            className: 'font-sans'
-          });
-        }).catch(() => {
-          toast.error('Copy failed');
+    // 2. Fallback to textarea + execCommand
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.top = '0';
+      textArea.style.left = '0';
+      textArea.style.width = '2em';
+      textArea.style.height = '2em';
+      textArea.style.padding = '0';
+      textArea.style.border = 'none';
+      textArea.style.outline = 'none';
+      textArea.style.boxShadow = 'none';
+      textArea.style.background = 'transparent';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return !!successful;
+    } catch (err) {
+      console.error('Fallback copy failed:', err);
+      return false;
+    }
+  };
+
+  const handleCellClick = async (r: number, c: number, value: CellData) => {
+    setSelectedCell({ r, c, value });
+    const strValue = String(value).trim();
+    if (strValue && strValue !== 'null' && strValue !== 'undefined') {
+      const success = await copyTextToClipboard(strValue);
+      if (success) {
+        setCopiedCells(prev => {
+          const next = new Set(prev).add(`${r}-${c}`);
+          if (fileName && activeSheet) {
+            const key = `copiedCells-${fileName}-${activeSheet}`;
+            let currentData: Record<string, number> = {};
+            try {
+              const saved = localStorage.getItem(key);
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (!Array.isArray(parsed)) currentData = parsed;
+              }
+            } catch(e) {}
+            currentData[`${r}-${c}`] = Date.now();
+            localStorage.setItem(key, JSON.stringify(currentData));
+            
+            // Sync click with server
+            fetch('/api/copied-cells', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key, data: currentData })
+            }).catch(err => console.error("Failed to sync click with server:", err));
+          }
+          return next;
         });
+        toast.success('কপি করা হয়েছে! (Copied)', {
+          description: `Cell ${numberToColumn(c)}${r + 1} content copied to clipboard.`,
+          duration: 1500,
+          className: 'font-sans'
+        });
+      } else {
+        toast.error('Copy failed');
       }
-    }, 250);
+    }
   };
 
   const handleCellDoubleClick = (r: number, c: number) => {
@@ -352,6 +482,13 @@ export default function App() {
         } catch(e) {}
         delete currentData[`${r}-${c}`];
         localStorage.setItem(key, JSON.stringify(currentData));
+        
+        // Sync double-click with server
+        fetch('/api/copied-cells', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key, data: currentData })
+        }).catch(err => console.error("Failed to sync double click with server:", err));
       }
       return newSet;
     });
@@ -563,7 +700,7 @@ export default function App() {
                    <tr>
                      <th className="w-12 bg-slate-200/95 border-r border-slate-300 sticky left-0 z-40 shadow-[1px_0_0_0_#cbd5e1]"></th>
                      {sheetData[0]?.map((_, colIndex) => (
-                       <th key={colIndex} className={`px-3 py-1.5 border-r border-slate-300 font-mono text-[11px] font-bold uppercase tracking-widest min-w-[100px] max-w-[300px] truncate select-none transition-colors ${selectedCell?.c === colIndex ? 'bg-indigo-100 text-indigo-800' : 'text-slate-600'}`}>
+                       <th key={colIndex} className={`px-3 py-1.5 border-r border-slate-300 font-mono text-[11px] font-bold uppercase tracking-widest min-w-[100px] max-w-[300px] truncate select-none transition-colors ${selectedCell?.c === colIndex ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200/95 text-slate-800'}`}>
                          {numberToColumn(colIndex)}
                        </th>
                      ))}
@@ -578,7 +715,7 @@ export default function App() {
                       key={originalIndex} 
                       className="border-b border-slate-200 hover:bg-slate-50/50 transition-colors group"
                     >
-                      <td className={`sticky left-0 z-20 w-12 border-r border-slate-300 shadow-[1px_0_0_0_#cbd5e1] text-center text-xs font-semibold group-hover:bg-slate-200/60 transition-colors select-none ${selectedCell?.r === originalIndex ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-500'}`}>
+                      <td className={`sticky left-0 z-20 w-12 border-r border-slate-300 shadow-[1px_0_0_0_#cbd5e1] text-center text-xs font-bold transition-colors select-none ${selectedCell?.r === originalIndex ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200/95 text-slate-800'}`}>
                         {originalIndex + 1}
                       </td>
                       {row.map((cell, colIndex) => {
@@ -588,6 +725,7 @@ export default function App() {
                           <td 
                             key={colIndex} 
                             onClick={() => handleCellClick(originalIndex, colIndex, cell)}
+                            onDoubleClick={() => handleCellDoubleClick(originalIndex, colIndex)}
                             className={`px-3 py-1.5 border-r border-slate-100 text-[13px] truncate cursor-copy transition-all h-[30px] max-w-[250px] whitespace-nowrap ${
                               isCopied
                                 ? 'bg-red-500 text-white font-medium z-10 relative'
@@ -971,6 +1109,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      <Authenticator />
       <Toaster position="bottom-right" richColors theme="light" closeButton style={{ fontFamily: 'Inter, sans-serif' }} />
     </div>
   );

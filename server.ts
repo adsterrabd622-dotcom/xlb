@@ -35,6 +35,26 @@ function saveToDb(fileMeta: any) {
   fs.writeFileSync(getDbFilePath(), JSON.stringify(db));
 }
 
+function getCopiedCellsDbFilePath() {
+  return path.join(process.cwd(), 'copied_cells_db.json');
+}
+
+function getCopiedCellsDb() {
+  const dbPath = getCopiedCellsDbFilePath();
+  if (!fs.existsSync(dbPath)) {
+    fs.writeFileSync(dbPath, JSON.stringify({}));
+  }
+  try {
+    return JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveCopiedCellsDb(db: any) {
+  fs.writeFileSync(getCopiedCellsDbFilePath(), JSON.stringify(db));
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -138,6 +158,32 @@ async function startServer() {
       res.download(filePath);
     } else {
       res.status(404).send("File not found");
+    }
+  });
+
+  apiRouter.get('/copied-cells/:key', (req, res) => {
+    try {
+      const db = getCopiedCellsDb();
+      res.json(db[req.params.key] || {});
+    } catch (error) {
+      console.error("Get copied cells error:", error);
+      res.status(500).json({ error: 'Failed to retrieve backup' });
+    }
+  });
+
+  apiRouter.post('/copied-cells', (req, res) => {
+    try {
+      const { key, data } = req.body;
+      if (!key) {
+        return res.status(400).json({ error: 'Missing key' });
+      }
+      const db = getCopiedCellsDb();
+      db[key] = data || {};
+      saveCopiedCellsDb(db);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Save copied cells error:", error);
+      res.status(500).json({ error: 'Failed to save backup' });
     }
   });
 
