@@ -28,6 +28,66 @@ function numberToColumn(num: number): string {
   return letRef;
 }
 
+const DB_NAME = 'ExcelViewerDB';
+const STORE_NAME = 'FileStore';
+
+const initDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+        request.result.createObjectStore(STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const saveFileToDB = async (file: File) => {
+  try {
+    const db = await initDB();
+    return new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      store.put(file, 'currentFile');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch(e) {
+    console.error("IndexedDB error", e);
+  }
+};
+
+const loadFileFromDB = async (): Promise<File | null> => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get('currentFile');
+      request.onsuccess = () => resolve(request.result as File);
+      request.onerror = () => reject(request.error);
+    });
+  } catch(e) {
+    console.error("IndexedDB load error", e);
+    return null;
+  }
+};
+
+const clearFileFromDB = async () => {
+  try {
+    const db = await initDB();
+    return new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      store.delete('currentFile');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch(e) {}
+};
+
 export default function App() {
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
   const [sheets, setSheets] = useState<string[]>([]);
@@ -196,6 +256,13 @@ export default function App() {
       weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' 
     };
     setCurrentDate(new Date().toLocaleDateString('en-US', dateOptions));
+
+    // Restore cached file on reload
+    loadFileFromDB().then(cachedFile => {
+      if (cachedFile) {
+        processFile(cachedFile, true);
+      }
+    });
   }, []);
 
   const loadReceivedFiles = async () => {
@@ -258,7 +325,7 @@ export default function App() {
     }
   };
 
-  const processFile = (file: File) => {
+  const processFile = (file: File, fromCache = false) => {
     if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
       toast.error('Invalid file type. Please upload Excel or CSV formats.');
       return;
@@ -266,6 +333,10 @@ export default function App() {
     setFileName(file.name);
     setRawFile(file);
     setIsSent(false);
+    
+    if (!fromCache) {
+      saveFileToDB(file);
+    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -508,6 +579,7 @@ export default function App() {
       setViewState('file-box');
     } else {
       setViewState('upload');
+      clearFileFromDB();
     }
   };
 
